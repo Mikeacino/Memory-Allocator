@@ -11,13 +11,10 @@
 #include <heapapi.h>
 #include <time.h>
 
-typedef char alignment_value[20];   //Use the 'union' to force the size of the header to grow.
+typedef char alignment_value[20];   //Use the 'union' to force the size of the header to grow to a min size
 void* memory_start;
 
-
-
-
-/**
+/** sets up format for header
  * This is our header that allows us to traverse between memory block quickly.
  *      We need to ensure the headers are constant size, so we use a union.
 */
@@ -33,15 +30,10 @@ union union_memory_header {
 typedef union union_memory_header mem_header;     //This makes the mem_header a data type, i think.
 mem_header *head_ptr, *tail_ptr;
 
-
-
-
-/**
+/** get_free_block() variant? I know malloc() does this, but i'm not sure if this is integral or seperate
  * Check the free list for an empty block.
- *      Just checks the headers and keep going until the list is done
- *      Returns a pointer, wither null for no luck, or the pointer if valid memory was found.
- *      I really like a lot of the logic in this method.
- *      Returns NULL if no block is found
+ *      Returns null if no viable block was found
+ *      Returns a pointer to the available block if one was found
  */
 mem_header* check_free_list(int needed_size){
     mem_header* current_block = head_ptr;       //Start at the newest block.
@@ -64,69 +56,89 @@ mem_header* check_free_list(int needed_size){
     return NULL;            //This would mean no viable memory was found.
 }
 
+/** Debugging function
+ * prints out the pointers for the Head and Tail. Helps make sure they move correctly
+**/
+void print_head_tail(){
+    printf("---------Begin Head/Tail---------\n");
+    printf("The head pointer is at: %d\n", head_ptr);
+    printf("The tail pointer is at: %d\n", tail_ptr);
+    printf("----------End Head/Tail----------\n");
+}
 
+/** Debugging function
+ * Prints out the details of a header.
+**/
+void print_header_details(mem_header* header_ptr){
+    printf("--------------Start Header Details--------------\n");
+    printf("Header pointer is at: %d\n", header_ptr);
+    mem_header dummy_header = *header_ptr;
+    printf("Header total size is: %d\n", sizeof(dummy_header));
+    printf("Blocks allocated: %d\n", dummy_header.HEADY.bytes_included);
+    if(!dummy_header.HEADY.mem_is_free){
+        printf("This block is: FREE\n");
+    } else {
+        printf("This block is: NOT FREE\n");
+    }
+    if(!dummy_header.HEADY.next_memory){
+        printf("This block is the end of the list\n");
+    } else {
+        printf("The next block is at: %d\n",dummy_header.HEADY.next_memory);
+    }
+    printf("---------------End Header Details---------------\n");
 
+}
 
-/**
+/** malloc() variant
  * This is the bulk of the code, rewritten from a C++ program that got bogged down in the simulation details
  *      It returns a pointer to the new block of memory.
 */
 mem_header* mike_malloc(size_t blocksRequested){
     if (!blocksRequested){       //If blocks = 0
+        printf("Oops, no memory requested, nothing happens.");
         return NULL;
-    }
-
-    mem_header* prev_header;     //Store the location of the soon to be previous block
-    //Check the Free List! Running into weird errors!
-    //if(!check_free_list(blocksRequested)){
-        //splitMemory
-    //}
-
-    mem_header new_header;          //This is our new header
-    mem_header *new_header_ptr;     //This is the location of our new header
-    new_header_ptr = &new_header;   //Set the pointer to this new header
-    
-    if(!head_ptr){             //If this is the first header, set the head and tail.
-        prev_header = NULL;
-        head_ptr = new_header_ptr;
-        tail_ptr = memory_start;
     } else {
-        prev_header = head_ptr;     //Store the start of the old header
+        mem_header new_header;          //This is our new header
+        mem_header *new_header_ptr;     //This is the location of our new header
+        new_header_ptr = check_free_list(blocksRequested); //Store the result, NULL means do the rest
+        if(new_header_ptr){             //The free list returned Not Null
+            return new_header_ptr;      //Found a viable free block, back out
+        }
+        new_header_ptr = &new_header;   //Set the pointer to this new header
+
+        if(head_ptr){                   //If this is not null, move the header to this block.
+            new_header_ptr->HEADY.next_memory = head_ptr;     //Store the start of the old header
+            head_ptr = new_header_ptr;  //Move the Head to this block
+        } else {                        //If this is null, this is the first header ever.
+            new_header_ptr->HEADY.next_memory = NULL;
+            head_ptr = new_header_ptr;  //Head ptr needs to start somewhere
+            tail_ptr = new_header_ptr;  //Tail pointer never moves from the first block.
+        }
+
+        //Allocate this much
+        size_t total_memory_size = blocksRequested + sizeof(&new_header_ptr);
+        head_ptr = sbreak(total_memory_size);   //Move the head to the latest block in memory.
+
+        new_header_ptr->HEADY.bytes_included = blocksRequested;
+        new_header_ptr->HEADY.mem_is_free = 1;  //Block is Not Free
+        return new_header_ptr;                  //Return the block of memory after the one given by sbrk()
     }
-
-
-    //Allocate this much
-    printf("Header size is: %d\n", sizeof(new_header));
-    size_t total_memory_size = blocksRequested + sizeof(new_header);
-    //head = sbreak(total_memory_size);         //Move the head to the location of this new block.
-    printf("\nThis is how much to allocate! %d\n", total_memory_size);
-
-    new_header_ptr->HEADY.bytes_included = blocksRequested;
-    new_header_ptr->HEADY.mem_is_free = 0;
-    int new_size = new_header_ptr->HEADY.bytes_included;
-    printf("The size of this header is %d\n", new_size);
-
-    new_header.HEADY.next_memory = prev_header;
-
-    return new_header_ptr;              //Return the block of memory after the one given by sbrk()
 }
 
+/** free() variant
+ * This is my free, it frees the memory at a specified block. This requires traversing the free list.
+ *      Once it finds the block, it just needs to flip a bit.
+**/
 void mike_free(void* victim){
-    
+    mem_header *current_header = victim;        //cram the pointer into a header pointer
+    mem_header current_block = *current_header; //Get the header at that location
+    current_block.HEADY.mem_is_free = 0;        //Set the block to free 
 }
-
 
 int main() {
-    srand(time(0));
-    int rando = rand() % 70 + 30;
-    printf("\n\nI asked for this many blocks: %d\n", rando);
-    mem_header* first_mem = mike_malloc(rando);
-    rando = rand() % 70 + 30;
-    printf("\n\nI asked for this many blocks: %d\n", rando);
-    mem_header* second_mem = mike_malloc(rando);
-    //mem_header actual_mem = my_mem;
-    printf("MY first header is at %d\n", first_mem);
-    printf("MY second header is at %d\n", second_mem);
-    printf("I recieved this many blocks %d\n", &first_mem->HEADY.bytes_included);
+    srand(time(0));                                             //Set a random num
+    int rando = rand() % 70 + 30;                               //Set range to [30, 100]
+    printf("\n\nI asked for this many blocks: %d\n", rando);    
+    mem_header *first_mem = mike_malloc(rando);                 //Just grab the header as if we want it
     return 0;
 }
